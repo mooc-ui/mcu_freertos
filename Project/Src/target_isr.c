@@ -11,6 +11,10 @@
 #include "main.h"
 #include "motor_ctrl.h"
 
+#include <stdbool.h>
+#include "highSpeedMotor.h"
+#include "hardwareTimer.h"
+
 #define AUDIO_DATA_START_INDEX    44
 #define UART_SEND_SIZE            4
 
@@ -38,6 +42,16 @@ extern volatile uint8_t charging;
 extern volatile uint8_t charge_over_flag;
 
 
+static uint32_t highSpeedMotorPulseTotalTime = 0;
+static uint32_t highSpeedMotorPulseCount = 0;
+
+#define BUTTON_LONG_PRESS_TIME_INTERVAL 1000 //uint=1s
+
+
+static uint32_t judgeButton1LongPressTimeInterval = BUTTON_LONG_PRESS_TIME_INTERVAL;
+static uint32_t judgeButton2LongPressTimeInterval = BUTTON_LONG_PRESS_TIME_INTERVAL;
+static bool judgeButton1IsLongPress = false;
+static bool judgeButton2IsLongPress = false;
 
 /**
   * @brief  This function handles NMI exception.
@@ -66,58 +80,54 @@ void HardFault_Handler(void)
   * @param  None
   * @retval None
   */
-void SVC_Handler(void)
-{
-}
+//void SVC_Handler(void)
+//{
+//}
 
 /**
   * @brief  This function handles PendSVC exception.
   * @param  None
   * @retval None
   */
-void PendSV_Handler(void)
-{
-}
+//void PendSV_Handler(void)
+//{
+//}
 
 //#define T4 *((volatile unsigned long *)((((uint32_t) IOC_DAT) & 0xF0000000)+0x2000000+((((uint32_t)IOC_DAT) &0xFFFFF)<<5)+(11<<2)))  //IOC11 T4
+
+#include <stdbool.h>
+extern void testGPIOHigh(void);
+extern void testGPIOLow(void);
+
+static uint16_t isOneSecondComing = 1000;
+static uint32_t systemTimeSecond = 0;
 
 /**
   * @brief  This function handles SysTick Handler.
   * @param  None
   * @retval None
   */
-void SysTick_Handler(void)
-{
-		uint8_t index;
+//void SysTick_Handler(void)
+//{
+//		uint8_t index;
 
-//		systick_cnt = 1 - systick_cnt;
-//		T4 = systick_cnt;
-	
-//	  //测主电机转速用
-//	  __disable_irq();
-//	  if (wsx_full_check.motor_speed_int_cnt > 0)
-//			wsx_full_check.motor_speed_timer_cnt++;
-//		__enable_irq();
-    
-    for (index = 0; index < TASK_NUM_MAX; index++) {
-        if (TaskTimer[index] > 0) {
-            TaskTimer[index]--;
-        }
-    }
-		
-//    //水泵工作pwm1
-//		{	
-//				//18Hz 13%占空比
-//				pwm2_cnt++;
-//				if (pwm2_cnt <= 15)   //原值14 测试时降低功率 原值20
-//					GPIOBToF_SetBits(GPIOB, GPIO_Pin_6); 
-//				else
-//				{
-//					GPIOBToF_ResetBits(GPIOB, GPIO_Pin_6);
-//					if (pwm2_cnt >= 71)
-//						pwm2_cnt = 0;
-//				}		
+//		isOneSecondComing--;
+//		if(0 == isOneSecondComing){
+//				isOneSecondComing = 1000;//reload value
+//				systemTimeSecond++;
 //		}
+//		
+//    
+//    for (index = 0; index < TASK_NUM_MAX; index++) {
+//        if (TaskTimer[index] > 0) {
+//            TaskTimer[index]--;
+//        }
+//    }
+//}
+
+uint32_t getSysTime(void)
+{
+		return systemTimeSecond;
 }
 
 volatile uint8_t pmu_cnt = 0;
@@ -127,8 +137,69 @@ volatile uint8_t pmu_cnt = 0;
   * @param  None
   * @retval None
   */
+
+extern void timer0Start(void);
+extern void timer0Stop(void);
+
+bool sw1KeyFlag = 0;
+bool sw2KeyFlag = 0;
 void PMU_IRQHandler(void)
 {
+	
+#if 1	//test GPIOA's KEY function
+	
+	if (PMU_GetIOAINTStatus(GPIO_Pin_5))
+  {
+    PMU_ClearIOAINTStatus(GPIO_Pin_5);
+		sw2KeyFlag = 1;
+		judgeButton1IsLongPress = true;
+    printf("PMU, IOA5 EXIT\r\n");
+  }	
+	
+	if (PMU_GetIOAINTStatus(GPIO_Pin_6))
+  {
+    PMU_ClearIOAINTStatus(GPIO_Pin_6);
+		sw1KeyFlag = 1;
+		judgeButton2IsLongPress = true;
+    printf("PMU, IOA6 EXIT\r\n");
+  }
+		
+	
+	if (PMU_GetIOAINTStatus(GPIO_Pin_7))
+  {
+    PMU_ClearIOAINTStatus(GPIO_Pin_7);
+    printf("machine is standing\r\n");
+  }		
+	
+  if (PMU_GetIOAINTStatus(GPIO_Pin_3))  //计算电机的转速，恒功率情况下：进风口堵得越多，负载越小，电机转速越高   
+  {
+    PMU_ClearIOAINTStatus(GPIO_Pin_3);  //休眠时，按键中断唤醒mcu
+		
+		
+		if(MOTOR_IS_MODIFIING_ROTARY_SPEED == getHighSpeedMotorStatus() || MOTOR_STOP_WORK == getHighSpeedMotorStatus()){//judge motor working status
+				setHighSpeedMotorStatus(MOTOR_IS_NORMAL_WORK);
+				highSpeedMotorPulseCount = 0;
+				timer0Start();
+				timer0Stop();
+		}
+		
+		if(0 == highSpeedMotorPulseCount){
+				highSpeedMotorPulseTotalTime = 0;//clear
+				timer0Start();
+		}
+		highSpeedMotorPulseCount++;
+		if(highSpeedMotorPulseCount>HIGH_SPEED_MOTOR_MEASURE_TOTAL_COUNT){
+				highSpeedMotorPulseCount = 0;
+				timer0Stop();//
+		}
+		//GPIOBToF_WriteBit(GPIOC, GPIO_Pin_9, !GPIOBToF_ReadOutputDataBit(GPIOC, GPIO_Pin_9));//test for measure calibration 
+	}		
+	
+	
+#endif
+	
+#if 0	
+	
   if (PMU_GetIOAINTStatus(GPIO_Pin_4) || PMU_GetIOAINTStatus(GPIO_Pin_6))
   {
     PMU_ClearIOAINTStatus(GPIO_Pin_4 | GPIO_Pin_6);  //休眠时，按键中断唤醒mcu
@@ -195,6 +266,13 @@ void PMU_IRQHandler(void)
 			}
 		}		
   }	
+#endif	
+	
+}
+
+uint32_t getMotorRotateSpeedMeasureRawData(void)
+{
+		return highSpeedMotorPulseTotalTime;
 }
 
 /**
@@ -308,6 +386,16 @@ volatile uint16_t audio_ff_cnt = 0;
 
 void TMR0_IRQHandler(void)
 {
+	
+  if (TMR_GetINTStatus(TMR0))
+  {
+		highSpeedMotorPulseTotalTime++;
+    TMR_ClearINTStatus(TMR0);
+    /* Toggle IOB7 */
+    //GPIOBToF_WriteBit(GPIOC, GPIO_Pin_9, !GPIOBToF_ReadOutputDataBit(GPIOC, GPIO_Pin_9));//test pin togger
+  }	
+	
+	
 //	if (TMR_GetINTStatus(TMR0))
 //	{
 //		TMR_ClearINTStatus(TMR0);
@@ -357,6 +445,43 @@ void TMR0_IRQHandler(void)
   */
 void TMR1_IRQHandler(void)
 {
+  if (TMR_GetINTStatus(TMR1))
+  {
+    TMR_ClearINTStatus(TMR1);
+    
+		//button1 longPress/shortPress
+		if(judgeButton1IsLongPress){
+				judgeButton1LongPressTimeInterval--;
+			
+				if(0 == judgeButton1LongPressTimeInterval){
+						if(0 == GPIOA_ReadInputDataBit(GPIOA,GPIO_Pin_5)){
+								//key is long press
+								//GPIOBToF_WriteBit(GPIOC, GPIO_Pin_9, !GPIOBToF_ReadOutputDataBit(GPIOC, GPIO_Pin_9));//test pin togger
+						}else{
+								//short press
+						}
+						judgeButton1IsLongPress = false;
+						judgeButton1LongPressTimeInterval = BUTTON_LONG_PRESS_TIME_INTERVAL;					
+				}			
+		}//end	
+		
+		//button2 longPress/shortPress
+		if(judgeButton2IsLongPress){
+				judgeButton2LongPressTimeInterval--;
+			
+				if(0 == judgeButton2LongPressTimeInterval){
+						if(0 == GPIOA_ReadInputDataBit(GPIOA,GPIO_Pin_6)){
+								//key is long press
+								GPIOBToF_WriteBit(GPIOC, GPIO_Pin_9, !GPIOBToF_ReadOutputDataBit(GPIOC, GPIO_Pin_9));//test pin togger
+						}else{
+								//short press
+						}
+						judgeButton2IsLongPress = false;
+						judgeButton2LongPressTimeInterval = BUTTON_LONG_PRESS_TIME_INTERVAL;					
+				}			
+		}//end
+		
+  }			
 }
 
 /**
@@ -366,6 +491,12 @@ void TMR1_IRQHandler(void)
   */
 void TMR2_IRQHandler(void)
 {
+	
+  if (TMR_GetINTStatus(TMR1))
+  {
+    TMR_ClearINTStatus(TMR1);
+  }		
+	
 }
 
 /**
@@ -375,6 +506,12 @@ void TMR2_IRQHandler(void)
   */
 void TMR3_IRQHandler(void)
 {
+	
+  if (TMR_GetINTStatus(TMR3))
+  {
+    TMR_ClearINTStatus(TMR3);
+  }	
+	
 }
 
 /**
@@ -441,9 +578,9 @@ void FLASH_IRQHandler(void)
   * @param  None
   * @retval None
   */
-void ANA_IRQHandler(void)
-{
-}
+//void ANA_IRQHandler(void)
+//{
+//}
 
 #define	SPI1_CS_1 		GPIOBToF_SetBits(GPIOB, GPIO_Pin_9)  		
 #define	SPI1_CS_0 		GPIOBToF_ResetBits(GPIOB, GPIO_Pin_9)       //CS

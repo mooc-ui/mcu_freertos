@@ -13,6 +13,10 @@
 #include "adc.h"
 #include "motor_ctrl.h"
 #include "user.h"
+#include "target_isr.h"
+#include "main.h"
+#include <stdbool.h>
+#include "delay.h"
 
 uint16_t adc_result = 0;
 
@@ -38,10 +42,13 @@ extern volatile uint8_t brush_type;
 
 extern sys_status_t sys_status;
 
+bool adcConvertDone = false;
+sampleAdcSelect qAdcResultValue = {0};
 
 void adc_init(uint32_t Channel)
 {
   ADCInitType ADC_InitStruct;
+	GPIO_InitType GPIO_InitStruct;
 	
 	//GPIO_InitType GPIO_InitStruct;
   
@@ -57,7 +64,7 @@ void adc_init(uint32_t Channel)
 //	
 //	//ADC7 ADC8
 //	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_4 | GPIO_Pin_5;
-//  GPIOBToF_Init(GPIOE, &GPIO_InitStruct);
+//  GPIOBToF_Init(GPIOE, &GPIO_InitStruct);	
 	
   /* ADC initialization */
   ADC_DeInit();
@@ -70,18 +77,86 @@ void adc_init(uint32_t Channel)
 	
 	
   ADC_CAPDivisionCmd(ENABLE);
-	
-//	//20220105 wwb add 提高采样速率 采样周期150us
-//	ADC_CICSkipConfig(ADC_SKIP_2);
-//	ADC_CICDownSamRateConfig(ADC_SDRSEL_DIV64);	
+
+	ADC_INTConfig(ADC_INT_MANUALDONE,ENABLE);
+	CORTEX_NVIC_ClearPendingIRQ(ANA_IRQn);
+	CORTEX_NVIC_EnableIRQ(ANA_IRQn);//adc interrupt config
   
   /* Enable ADC */
   ADC_Cmd(ENABLE);
   /* Starts a manual ADC conversion */
   ADC_StartManual();
-  
-//  /* Waiting Manual ADC conversion done */
-//  ADC_WaitForManual();
+}
+
+
+void ANA_IRQHandler(void)
+{
+		if(1 == ADC_GetManualDoneFlag()){
+				ADC_ClearManualDoneFlag();
+				qAdcResultValue.getChannelAdcValue = ADC_GetADCConversionValue(qAdcResultValue.channel);
+				//printf("adc manual convert done\n");
+		}
+	
+//		if(1 == ADC_GetAutoDoneFlag()){
+//				ADC_ClearAutoDoneFlag();
+//				qAdcResultValue.getChannelAdcValue = ADC_GetADCConversionValue(qAdcResultValue.channel);
+//				//printf("adc auto convert done\n");	
+//		}
+		
+		adcConvertDone = true;
+}
+
+
+/*
+*adcChannelSelect param select :
+*ADC_CHANNEL3
+*ADC_CHANNEL4
+*ADC_CHANNEL7
+*ADC_CHANNEL8
+*ADC_CHANNEL9
+*ADC_CHANNEL11
+*/
+
+void startADCSample(uint32_t adcChannelSelect)
+{
+		adc_init(adcChannelSelect);
+		ADC_StartManual();
+}
+
+void getAdcSampleValueResult(void)
+{
+		//
+}
+
+void setAdcSampleValueResult(void)
+{
+		//
+}
+
+/*
+* adc test function
+*/
+
+void adcTestFunction(void)
+{
+	static float voltageConvertResultValue;
+	static uint8_t adcChannelTotal[ADC_SAMPLE_CHANNEL] = {ADC_CHANNEL3,ADC_CHANNEL4,ADC_CHANNEL6,ADC_CHANNEL7,ADC_CHANNEL8,ADC_CHANNEL9,ADC_CHANNEL11};//当改变通道数量的时候记得修改宏大小
+	static uint8_t adcChannelIndex = 0;	
+	
+	if(adcConvertDone){
+			adcConvertDone = false;
+			//if(ADC_CalculateVoltage(ADC_3V_EXTERNAL_NODIV, adcValue, &voltageConvertResultValue))
+			if (ADC_CalculateVoltage(ADC_3V_EXTERNAL_CAPDIV, qAdcResultValue.getChannelAdcValue, &voltageConvertResultValue))
+			{
+				printf("NVR checksum error!\r\n");
+			}else{
+				printf("channel %d adcValue = %d Voltage is %.3fV\r\n", qAdcResultValue.channel, qAdcResultValue.getChannelAdcValue, voltageConvertResultValue);	
+			}						
+	}
+
+	startADCSample(adcChannelTotal[adcChannelIndex%ADC_SAMPLE_CHANNEL]);
+	qAdcResultValue.channel = adcChannelTotal[adcChannelIndex%ADC_SAMPLE_CHANNEL];
+	adcChannelIndex++;
 }
 
 uint8_t adc_is_done(void)

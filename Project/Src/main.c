@@ -15,12 +15,25 @@
 #include "string.h"
 #include "motor_ctrl.h"
 #include "uart.h"
+#include "target_isr.h"
 
+#include <stdbool.h>
 #include "v_stdio.h"
+
+#include "dwinScreenDriver.h"
+#include "chargePedestal.h"
+#include "battery.h"
+#include "highSpeedMotor.h"
+#include "floorBrushPump.h"
+#include "floorBrushMotor.h"
+#include "hardwareTimer.h"
+
+#include "FreeRTOS.h"
+#include "task.h"
 
 /* Private functions ---------------------------------------------------------*/
 
-volatile uint8_t run_flag = 0;                  //Ä¬ï¿½ï¿½Îªï¿½Ø»ï¿½
+volatile uint8_t run_flag = 0;                  //Ä¬ÈÏÎª¹Ø»ú
 uint8_t mode0_step = 0;
 uint8_t mode1_step = 0;
 
@@ -116,6 +129,9 @@ IR_T ir;
   * @param  None
   * @retval None
   */
+	
+uint32_t SystemCoreClock = 	32768000;//CLK_PLLH_32_768MHz;
+	
 void Clock_Init(void)
 {
   CLK_InitTypeDef CLK_Struct;
@@ -128,7 +144,7 @@ void Clock_Init(void)
   CLK_Struct.PLLH.Frequency = CLK_PLLH_32_768MHz;
   CLK_Struct.PLLH.Source    = CLK_PLLHSRC_XTALH;
   CLK_Struct.PLLH.State     = CLK_PLLH_ON;
-  CLK_Struct.HCLK.Divider   = 1;    //FLASHï¿½ï¿½ï¿½Ğ³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö§ï¿½ï¿½26MHzï¿½ï¿½ï¿½ï¿½ï¿½ï¿½/2  //20210630 modify for test
+  CLK_Struct.HCLK.Divider   = 1;    //FLASHÔËĞĞ³ÌĞò×î¸ßÖ§³Ö26MHz£¬ËùÒÔ/2  //20210630 modify for test
   CLK_Struct.PCLK.Divider   = 2;    //Ô­ÖµÎª1 20220104 wwb modify 1 -> 2  
   CLK_ClockConfig(&CLK_Struct);
 }
@@ -138,7 +154,7 @@ void uarts_init(void)
 	UART_InitType UART_InitStruct;
 	GPIO_InitType GPIO_InitStruct;
 	
-  /* UART0 RX pin(IOA12), input mode ï¿½ï¿½Ê¾ï¿½ï¿½Í¨ï¿½Å´ï¿½ï¿½ï¿½*/
+  /* UART0 RX pin(IOA12), input mode ÏÔÊ¾ÆÁÍ¨ĞÅ´®¿Ú*/
   GPIO_InitStruct.GPIO_Mode = GPIO_Mode_INPUT; //GPIO_Mode_INPUT
   GPIO_InitStruct.GPIO_Pin = GPIO_Pin_12;
   GPIOA_Init(GPIOA, &GPIO_InitStruct);
@@ -155,7 +171,7 @@ void uarts_init(void)
   UART_INTConfig(UART0, UART_INT_TXDONE, ENABLE);
   CORTEX_SetPriority_ClearPending_EnableIRQ(UART0_IRQn, 0);	
 	
-  /* UART1 RX pin(IOA13), input mode ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¨ï¿½Å´ï¿½ï¿½ï¿½*/
+  /* UART1 RX pin(IOA13), input mode ³äµçµ××ùÍ¨ĞÅ´®¿Ú*/
   GPIO_InitStruct.GPIO_Mode = GPIO_Mode_INPUT; //GPIO_Mode_INPUT
   GPIO_InitStruct.GPIO_Pin = GPIO_Pin_13;
   GPIOA_Init(GPIOA, &GPIO_InitStruct);
@@ -172,7 +188,7 @@ void uarts_init(void)
   UART_INTConfig(UART1, UART_INT_TXDONE, ENABLE);
   CORTEX_SetPriority_ClearPending_EnableIRQ(UART1_IRQn, 0);	
 	
-  /* UART2 initialization ï¿½ï¿½ï¿½Í¨ï¿½Å´ï¿½ï¿½ï¿½*/
+  /* UART2 initialization µç³ØÍ¨ĞÅ´®¿Ú*/
   GPIO_InitStruct.GPIO_Mode = GPIO_Mode_INPUT; //GPIO_Mode_INPUT
   GPIO_InitStruct.GPIO_Pin = GPIO_Pin_14;
   GPIOA_Init(GPIOA, &GPIO_InitStruct);	
@@ -188,7 +204,7 @@ void uarts_init(void)
   UART_INTConfig(UART2, UART_INT_TXDONE, ENABLE);
   CORTEX_SetPriority_ClearPending_EnableIRQ(UART2_IRQn, 0);		
 	
-	//UART5 RX pin(IOB1)wifiÍ¨ï¿½Å´ï¿½ï¿½ï¿½
+	//UART5 RX pin(IOB1)wifiÍ¨ĞÅ´®¿Ú
   GPIO_InitStruct.GPIO_Mode = GPIO_Mode_INPUT; //GPIO_Mode_INPUT
   GPIO_InitStruct.GPIO_Pin = GPIO_Pin_1;
   GPIOBToF_Init(GPIOB, &GPIO_InitStruct);	
@@ -207,7 +223,7 @@ void uarts_init(void)
 	uarts_data_init();
 }
 
-//ï¿½ï¿½ï¿½ï¿½pwm0
+//²âÊÔpwm0
 void pwm0_init(void)
 {
   PWM_BaseInitType PWM_BaseInitStruct;
@@ -240,7 +256,7 @@ void pwm0_init(void)
   
   PWM_ClearCounter(PWM0);
   /* Enable PWM0 channel 0/1/2 output */
-  PWM_OutputCmd(PWM0, PWM_CHANNEL_0, ENABLE);  //pwm3ï¿½Ş²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+  PWM_OutputCmd(PWM0, PWM_CHANNEL_0, ENABLE);  //pwm3ÎŞ²¨ĞÎÊä³ö
   //PWM_OutputCmd(PWM0, PWM_CHANNEL_1, ENABLE);
 //  PWM_OutputCmd(PWM0, PWM_CHANNEL_2, ENABLE);
   
@@ -250,7 +266,7 @@ void pwm0_init(void)
   }
 }
 
-//ï¿½ï¿½ï¿½Ùµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ pwm3
+//¸ßËÙµç»ú¿ØÖÆ pwm3
 void main_motor_pwm_init(void)
 {
   PWM_BaseInitType PWM_BaseInitStruct;
@@ -258,7 +274,7 @@ void main_motor_pwm_init(void)
   
   /* PWM0 base initialization 
        - Count mode   : CONTINUOUS mode
-       - Clock source : PCLK 13M   ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½Æµ32.768MHzï¿½ï¿½Êµï¿½ï¿½Ö»ï¿½ï¿½ï¿½ï¿½26MHzï¿½ï¿½ï¿½ï¿½
+       - Clock source : PCLK 13M   ÀíÂÛÖµÖ÷Æµ32.768MHz£¬Êµ¼ÊÖ»ÄÜÅÜ26MHzÒÔÏÂ
        - Clock Divide : divide by 16     */
   PWM_BaseInitStruct.ClockDivision = PWM_CLKDIV_2;  //PWM_CLKDIV_4 20220104 modify
   PWM_BaseInitStruct.ClockSource = PWM_CLKSRC_APB;
@@ -272,23 +288,23 @@ void main_motor_pwm_init(void)
        Output: 12.5Hz 
        High/Low = (0x8000-0x2000)/(0xFFFF-0x6000) = 3/5
     */
-  //PWM_OLineConfig(PWM3_OUT0, PWM_OLINE_0); //Ô­ï¿½ï¿½Ğ´ï¿½ï¿½ï¿½ï¿½0ï¿½ï¿½20220204 wwb modify
+  //PWM_OLineConfig(PWM3_OUT0, PWM_OLINE_0); //Ô­À´Ğ´µÄÊÇ0£¬20220204 wwb modify
   PWM_OLineConfig(PWM3_OUT1, PWM_OLINE_1);	
   PWM_OCInitStruct.OutMode = PWM_OUTMOD_RESET_SET; //PWM_OUTMOD_TOGGLE_RESET
-  //PWM_OCInitStruct.Period = 256;     //Æµï¿½ï¿½8K	
+  //PWM_OCInitStruct.Period = 256;     //ÆµÂÊ8K	
   PWM_OC1Init(PWM3, &PWM_OCInitStruct);
 
-	PWM3->CCR0 = 1024;                 //Æµï¿½ï¿½8K
+	PWM3->CCR0 = 1024;                 //ÆµÂÊ8K
 	PWM3->CCR1 = 512;                  //20211105 wwb mask 512->614
   
   PWM_ClearCounter(PWM3);
   /* Enable PWM0 channel 0/1/2 output */
-  //PWM_OutputCmd(PWM3, PWM_CHANNEL_0, ENABLE);  //pwm3ï¿½Ş²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+  //PWM_OutputCmd(PWM3, PWM_CHANNEL_0, ENABLE);  //pwm3ÎŞ²¨ĞÎÊä³ö
   PWM_OutputCmd(PWM3, PWM_CHANNEL_1, DISABLE);
 //  PWM_OutputCmd(PWM3, PWM_CHANNEL_2, ENABLE);
 }
 
-//ï¿½ï¿½Ë¢ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½pwm2,2msï¿½ï¿½,ï¿½ï¿½ï¿½ï¿½8ms
+//µØË¢µç»ú¿ØÖÆpwm2,2ms¸ß,ÖÜÆÚ8ms
 void brush_motor_pwm_init(void)
 {
 	//GPIO_InitType GPIO_InitStruct;
@@ -321,15 +337,15 @@ void brush_motor_pwm_init(void)
 //	PWM_OLineConfig(PWM0_OUT1, PWM_OLINE_1);
 //  PWM_OCInitStruct.OutMode = PWM_OUTMOD_TOGGLE_RESET;  //PWM_OUTMOD_TOGGLE_RESET
 //  PWM_OCInitStruct.Period = 0x1000;   //0x6400;
-//  PWM_OC1Init(PWM0, &PWM_OCInitStruct);   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½PWM_OC1Init(PWM0, &PWM_OCInitStruct);->ï¿½Ø±ï¿½×¢ï¿½â²»ÒªĞ´ï¿½ï¿½ï¿½Ë£ï¿½ï¿½ï¿½ÒªĞ´ï¿½ï¿½:PWM_OC0Init
+//  PWM_OC1Init(PWM0, &PWM_OCInitStruct);   //£¡£¡£¡£¡£¡PWM_OC1Init(PWM0, &PWM_OCInitStruct);->ÌØ±ğ×¢Òâ²»ÒªĞ´´íÁË£¬²»ÒªĞ´³É:PWM_OC0Init
 //	
 	
-	PWM0->CCR0 = 0;   //Ä¬ï¿½ï¿½Öµï¿½ï¿½0
+	PWM0->CCR0 = 0;   //Ä¬ÈÏÖµÊÇ0
 	
 	PWM_OLineConfig(PWM0_OUT2, PWM_OLINE_2);
   PWM_OCInitStruct.OutMode = PWM_OUTMOD_TOGGLE_SET;  //PWM_OUTMOD_TOGGLE_RESET
   PWM_OCInitStruct.Period = 0x4000;   //0x4000;
-  PWM_OC2Init(PWM0, &PWM_OCInitStruct);   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½PWM_OC1Init(PWM0, &PWM_OCInitStruct);->ï¿½Ø±ï¿½×¢ï¿½â²»ÒªĞ´ï¿½ï¿½ï¿½Ë£ï¿½ï¿½ï¿½ÒªĞ´ï¿½ï¿½:PWM_OC0Init
+  PWM_OC2Init(PWM0, &PWM_OCInitStruct);   //£¡£¡£¡£¡£¡PWM_OC1Init(PWM0, &PWM_OCInitStruct);->ÌØ±ğ×¢Òâ²»ÒªĞ´´íÁË£¬²»ÒªĞ´³É:PWM_OC0Init
 	
   
   PWM_ClearCounter(PWM0);
@@ -339,7 +355,7 @@ void brush_motor_pwm_init(void)
   PWM_OutputCmd(PWM0, PWM_CHANNEL_2, DISABLE);	
 }
 
-//32.768MHzï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æµ,PCLKï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½ï¿½Ğ¡Ö»ï¿½ï¿½Ö§ï¿½Öµï¿½30Hzï¿½ï¿½pwmï¿½ï¿½
+//32.768MHzÀíÂÛÖ÷Æµ,PCLK²»·ÖÆµ£¬×îĞ¡Ö»ÄÜÖ§³Öµ½30HzµÄpwm²¨
 //void pump_motor_pwm_init(void)
 //{
 //  PWM_BaseInitType PWM_BaseInitStruct;
@@ -372,12 +388,12 @@ void brush_motor_pwm_init(void)
 //  
 //  PWM_ClearCounter(PWM1);
 //  /* Enable PWM0 channel 0/1/2 output */
-//  //PWM_OutputCmd(PWM1, PWM_CHANNEL_0, ENABLE);  //pwm1ï¿½Ş²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+//  //PWM_OutputCmd(PWM1, PWM_CHANNEL_0, ENABLE);  //pwm1ÎŞ²¨ĞÎÊä³ö
 //  PWM_OutputCmd(PWM1, PWM_CHANNEL_1, ENABLE);
 ////  PWM_OutputCmd(PWM1, PWM_CHANNEL_2, ENABLE);
 //}
 
-//PCLKï¿½ï¿½ï¿½ï¿½Æµ 15Hz
+//PCLK¶ş·ÖÆµ 15Hz
 void pump_motor_pwm_init(void)
 {
   PWM_BaseInitType PWM_BaseInitStruct;
@@ -406,11 +422,11 @@ void pump_motor_pwm_init(void)
   PWM_OC1Init(PWM1, &PWM_OCInitStruct);
 
 	PWM1->CCR0 = 0xFFFF;
-	PWM1->CCR1 = 0x3333;   //20%Õ¼ï¿½Õ±ï¿½
+	PWM1->CCR1 = 0x3333;   //20%Õ¼¿Õ±È
   
   PWM_ClearCounter(PWM1);
   /* Enable PWM0 channel 0/1/2 output */
-  //PWM_OutputCmd(PWM1, PWM_CHANNEL_0, ENABLE);  //pwm1ï¿½Ş²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+  //PWM_OutputCmd(PWM1, PWM_CHANNEL_0, ENABLE);  //pwm1ÎŞ²¨ĞÎÊä³ö
   PWM_OutputCmd(PWM1, PWM_CHANNEL_1, DISABLE);
 //  PWM_OutputCmd(PWM1, PWM_CHANNEL_2, ENABLE);	
 }
@@ -431,7 +447,7 @@ void PMU_init(void)
   WDT_Disable();
 	
   /* Can enter deep-sleep mode, when VDD5/VDCIN is not drop */
-  //PMU_PDNDSleepConfig(PMU_VDCINPDNS_1, PMU_VDDPDNS_1);     //ÒªÈ¥ï¿½ï¿½
+  //PMU_PDNDSleepConfig(PMU_VDCINPDNS_1, PMU_VDDPDNS_1);     //ÒªÈ¥µô
   
   /*------------------ Forbidden all GPIOs ------------------*/
   GPIO_InitStruct.GPIO_Mode = GPIO_Mode_FORBIDDEN;
@@ -460,7 +476,7 @@ void PMU_init(void)
   LowPower_InitStruct.AVCCPower           = PMU_AVCCPWR_ON;
   LowPower_InitStruct.TADCPower           = PMU_TADCPWR_OFF;
   LowPower_InitStruct.VDCINDetector       = PMU_VDCINDET_DISABLE;
-	LowPower_InitStruct.VDDDetector         = PMU_VDDDET_DISABLE;   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	LowPower_InitStruct.VDDDetector         = PMU_VDDDET_DISABLE;   //ĞÂÔöµÄ
   //PMU_EnterDSleep_LowPower(&LowPower_InitStruct);
   PMU_EnterSleep_LowPower(&LowPower_InitStruct);	
 }
@@ -490,7 +506,7 @@ void adc_auto_trig_init(void)
   TMR_DeInit(TMR0);
   TMR_InitStruct.ClockSource = TMR_CLKSRC_INTERNAL;
   TMR_InitStruct.EXTGT = TMR_EXTGT_DISABLE;
-  TMR_InitStruct.Period = 13107 - 1;  //Ô­Öµ13107200 - 1;  1msï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½adcï¿½ï¿½ï¿½ï¿½
+  TMR_InitStruct.Period = 13107 - 1;  //Ô­Öµ13107200 - 1;  1ms´¥·¢Ò»´Îadc²ÉÑù
   TMR_Init(TMR0, &TMR_InitStruct);
   
   /* Enable Timer0 */
@@ -524,17 +540,17 @@ void GPIO_init(void)
 	
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUTPUT_CMOS;
 	
-	UART_DeInit(UART0);	   //IOB2ï¿½ï¿½ï¿½ï¿½Îªioï¿½ï¿½	
-//	//IOB6 Ë®ï¿½Ã¿ï¿½ï¿½Æ£ï¿½IOB12 ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½ IOB15 ï¿½ï¿½ï¿½â·¢ï¿½Í£ï¿½Ë®ï¿½Ã¸ï¿½Îªpwm1ï¿½ï¿½ï¿½ï¿½
+	UART_DeInit(UART0);	   //IOB2½«ÉèÎªio¿Ú	
+//	//IOB6 Ë®±Ã¿ØÖÆ£»IOB12 ³äµçÊ¹ÄÜ IOB15 ºìÍâ·¢ËÍ£»Ë®±Ã¸ÄÎªpwm1¿ØÖÆ
 //	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_12 | GPIO_Pin_15;
 //  GPIOBToF_Init(GPIOB, &GPIO_InitStruct);
 //	GPIOBToF_ResetBits(GPIOB, GPIO_InitStruct.GPIO_Pin);
-	//IOB12 ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½ IOB15 ï¿½ï¿½ï¿½â·¢ï¿½Í£ï¿½
+	//IOB12 ³äµçÊ¹ÄÜ IOB15 ºìÍâ·¢ËÍ£»
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_12 | GPIO_Pin_15;
   GPIOBToF_Init(GPIOB, &GPIO_InitStruct);
 	GPIOBToF_ResetBits(GPIOB, GPIO_InitStruct.GPIO_Pin);	
 
-	//IOD12 ï¿½ï¿½ï¿½Ë®12Vï¿½ï¿½ï¿½ï¿½;IOD14 wifiÄ£ï¿½ï¿½ï¿½ï¿½ï¿½ATÖ¸ï¿½ï¿½Ä£Ê½(ï¿½ï¿½Ê¹ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½);IOD15 12V_EN ï¿½ï¿½Ê±ï¿½ï¿½12V_ENï¿½ï¿½Ê¹ï¿½ï¿½ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½3.3V
+	//IOD12 µç½âË®12V¿ØÖÆ;IOD14 wifiÄ£×é½øÈëATÖ¸ÁîÄ£Ê½(²»Ê¹ÓÃÊ±ÉÏÀ­);IOD15 12V_EN ÔİÊ±ÓÃ12V_ENÀ´Ê¹ÄÜÏÔÊ¾ÆÁµÄ3.3V
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_12 | GPIO_Pin_14 | GPIO_Pin_15;
   GPIOBToF_Init(GPIOD, &GPIO_InitStruct);
 	GPIOBToF_SetBits(GPIOD, GPIO_Pin_12 | GPIO_Pin_14); //20211220
@@ -548,12 +564,12 @@ void GPIO_init(void)
 	//GPIOBToF_ResetBits(GPIOC, GPIO_Pin_7 | GPIO_Pin_9);
 	
 	
-	//IOF0 ï¿½ï¿½Ë®Í°ï¿½ï¿½×°ï¿½ï¿½ï¿½
+	//IOF0 ÎÛË®Í°°²×°¼ì²â
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_INPUT;	
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0;
   GPIOBToF_Init(GPIOF, &GPIO_InitStruct);
-	
-	//IOA3ï¿½ï¿½ï¿½×ªï¿½Ù¼ï¿½ï¿½(ï¿½ï¿½ï¿½Úµï¿½ï¿½×ªï¿½Ù¼ï¿½ï¿½) IOA5Ä£Ê½ï¿½ï¿½,IOA6ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½,IOA7Ö±ï¿½ï¿½ï¿½Ğ¶ï¿½ //IOA9 ï¿½ï¿½Ë¢ï¿½ï¿½ï¿½
+		
+	//IOA3µç»ú×ªËÙ¼ì²â(ÓÃÓÚµç»ú×ªËÙ¼ì²â) IOA5Ä£Ê½¼ü,IOA6Ïû¶¾¼ü,IOA7Ö±Á¢ÅĞ¶Ï //IOA9 »»Ë¢¼ì²â
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_INPUT;
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7 | GPIO_Pin_9;
   GPIOA_Init(GPIOA, &GPIO_InitStruct);
@@ -567,7 +583,7 @@ void brush_err_notify(void)
 {
 		if (sys_faults.flags.brush_type_error)
 		{
-				if (0 == sys_time.brush_err_notify_cnt) //ï¿½ï¿½Ë¢ï¿½ï¿½ï¿½Í´ï¿½ï¿½ó£¬¼ï¿½ï¿½5sï¿½ï¿½ï¿½ï¿½ï¿½
+				if (0 == sys_time.brush_err_notify_cnt) //¹öË¢ÀàĞÍ´íÎó£¬¼ä¸ô5sÓïÒô²¥±¨
 				{}                              
 					
 				if (++sys_time.brush_err_notify_cnt >= 500) 
@@ -581,7 +597,7 @@ void bottom_unconnect_notify(void)
 {
 		if (!sys_status.flags.bottom_connected)
 		{
-				if (0 == sys_time.bottom_unconnect_notify_cnt) //ï¿½ï¿½Ë¢ï¿½ï¿½ï¿½Í´ï¿½ï¿½ó£¬¼ï¿½ï¿½5sï¿½ï¿½ï¿½ï¿½ï¿½
+				if (0 == sys_time.bottom_unconnect_notify_cnt) //¹öË¢ÀàĞÍ´íÎó£¬¼ä¸ô5sÓïÒô²¥±¨
 				{}                              
 					
 				if (++sys_time.bottom_unconnect_notify_cnt >= 500) 
@@ -595,7 +611,7 @@ void wsx_full_notify(void)
 {
 		if (sys_faults.flags.wsx_full)
 		{
-				if (0 == sys_time.wsx_full_notify_cnt) //ï¿½ï¿½Ë®ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½5sï¿½ï¿½ï¿½ï¿½ï¿½
+				if (0 == sys_time.wsx_full_notify_cnt) //ÎÛË®ÏäÂú£¬¼ä¸ô5sÓïÒô²¥±¨
 				{}                              
 					
 				if (++sys_time.wsx_full_notify_cnt >= 500) 
@@ -605,30 +621,30 @@ void wsx_full_notify(void)
 				sys_time.wsx_full_notify_cnt = 0;
 }
 
-//Ö±ï¿½ï¿½ï¿½ï¿½ï¿½
+//Ö±Á¢¼ì²â
 void upright_check(void)  
 {
-		if(0 == GPIOA_ReadInputDataBit(GPIOA, GPIO_Pin_7))  //Ö±ï¿½ï¿½Ê¶ï¿½ğ£¬µÍµï¿½Æ½ï¿½ï¿½Ğ§
+		if(0 == GPIOA_ReadInputDataBit(GPIOA, GPIO_Pin_7))  //Ö±Á¢Ê¶±ğ£¬µÍµçÆ½ÓĞĞ§
 		{
-			if (++sys_time.upright_check_cnt >= 3)  //ï¿½ï¿½Ê±È¥ï¿½ï¿½
+			if (++sys_time.upright_check_cnt >= 3)  //ÑÓÊ±È¥¶¶
 			{
 					sys_time.upright_check_cnt = 0;
 					sys_status.flags.upright = TRUE;
 			}
 		}
-		else     //Ö±ï¿½ï¿½ï¿½ï¿½Ê§
+		else     //Ö±Á¢ÏûÊ§
 		{
 			sys_time.upright_check_cnt = 0;
 			sys_status.flags.upright = FALSE;
 		}
 }
 
-//ï¿½ï¿½Ë®ï¿½ï¿½Î´ï¿½ï¿½×°ï¿½ï¿½ï¿½
+//ÎÛË®ÏäÎ´°²×°¼ì²â
 void wsx_install_check(void)
 {
-		if(1 == GPIOBToF_ReadInputDataBit(GPIOF, GPIO_Pin_0))  //ï¿½ï¿½×°ï¿½ï¿½ï¿½
+		if(1 == GPIOBToF_ReadInputDataBit(GPIOF, GPIO_Pin_0))  //°²×°¼ì²â
 		{
-			if (++sys_time.wsx_uninstall_check_cnt >= 3)  //ï¿½ï¿½Ê±È¥ï¿½ï¿½
+			if (++sys_time.wsx_uninstall_check_cnt >= 3)  //ÑÓÊ±È¥¶¶
 			{
 					sys_time.wsx_uninstall_check_cnt = 0;
 					sys_faults.flags.wsx_uninstall = TRUE;
@@ -637,7 +653,7 @@ void wsx_install_check(void)
 			if (!sys_faults.flags.wsx_uninstall)
 			{			
 					if (0 == sys_time.wsx_uninstall_notify_cnt)
-					{} 			 //ï¿½ï¿½ï¿½ï¿½ï¿½
+					{} 			 //ÓïÒô²¥±¨
 						
 					if (++sys_time.wsx_uninstall_notify_cnt >= 500)
 						sys_time.wsx_uninstall_notify_cnt = 0;							
@@ -669,20 +685,20 @@ void work_mode_proc(void)
 
 		switch(work_mode.mode)
 		{
-			case INTELLIGENT_MODE:        //ï¿½ï¿½ï¿½ï¿½Ä£Ê½
-				//1ï¿½ï¿½ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½Ä£Ê½Í¼Æ¬
-			  //2ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¾
-			  //3ï¿½ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½
+			case INTELLIGENT_MODE:        //ÖÇÄÜÄ£Ê½
+				//1¡¢ÏÔÊ¾ÖÇÄÜÄ£Ê½Í¼Æ¬
+			  //2¡¢ÓïÒôÌáÊ¾
+			  //3¡¢¶ÔÓ¦µç»ú¿ªÆôÊ¹ÄÜ
 				switch(work_mode.step)
 				{
-					case 0:   //ï¿½ï¿½Ê¾Í¼Æ¬
+					case 0:   //ÏÔÊ¾Í¼Æ¬
 						picture_display(PIC_INTELLIGENT);
 						ir_tx_enable();
 						work_mode.step++;
 
 						break;
 					
-					case 1:   //ï¿½ï¿½Ê±ï¿½ä²¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+					case 1:   //´í¿ªÊ±¼ä²¥·ÅÓïÒô
 						voice_play(TURN_ON);
 						work_mode.step++;
 					
@@ -694,9 +710,9 @@ void work_mode_proc(void)
 				
 				for (i = 0; i < MOTOR_CTRL_NUM; i++)
 				{
-					if (sys_status.val)            //Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Óµï¿½ï¿½ï¿½ï¿½ï¿½Í£ï¿½ï¿½ï¿½Ğµï¿½ï¿½
+					if (sys_status.val)            //Ö±Á¢»òÁ¬½Óµ××ù£¬Í£ËùÓĞµç»ú
 						motor_ctrl[i].en = DISABLE;
-					else                           //×¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğµï¿½ï¿½
+					else                           //×¼±¸¿ªËùÓĞµç»ú
 						motor_ctrl[i].en = ENABLE;
 				}
 
@@ -704,17 +720,17 @@ void work_mode_proc(void)
 				
 				break;
 			
-			case CARPET_MODE:        //ï¿½ï¿½ÌºÄ£Ê½
+			case CARPET_MODE:        //µØÌºÄ£Ê½
 				switch(work_mode.step)
 				{
-					case 0:   //ï¿½ï¿½Ê¾Í¼Æ¬
+					case 0:   //ÏÔÊ¾Í¼Æ¬
 						picture_display(PIC_CARPET);
 						ir_tx_enable();
 						work_mode.step++;
 					  
 						break;
 					
-					case 1:   //ï¿½ï¿½Ê±ï¿½ä²¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+					case 1:   //´í¿ªÊ±¼ä²¥·ÅÓïÒô
 						voice_play(TURN_OFF);
 						work_mode.step++;
 					
@@ -725,12 +741,12 @@ void work_mode_proc(void)
 				}
 			
 				motor_ctrl[PUMP_MOTOR].en = DISABLE;
-				if (sys_status.val)            //Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Óµï¿½ï¿½ï¿½ï¿½ï¿½Í£ï¿½ï¿½ï¿½Ğµï¿½ï¿½
+				if (sys_status.val)            //Ö±Á¢»òÁ¬½Óµ××ù£¬Í£ËùÓĞµç»ú
 				{
 					motor_ctrl[MAIN_MOTOR].en = DISABLE;
 					motor_ctrl[BRUSH_MOTOR].en = DISABLE;
 				}
-				else                             //×¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¹ï¿½Ë¢ï¿½ï¿½ï¿½
+				else                             //×¼±¸¿ªÖ÷µç»úºÍ¹öË¢µç»ú
 				{
 					motor_ctrl[MAIN_MOTOR].en = ENABLE;
 					motor_ctrl[BRUSH_MOTOR].en = ENABLE;
@@ -740,17 +756,17 @@ void work_mode_proc(void)
 
 				break;
 			
-			case AUTO_CLEAN_MODE:        //ï¿½ï¿½ï¿½ï¿½ï¿½Ä£Ê½
+			case AUTO_CLEAN_MODE:        //×ÔÇå½àÄ£Ê½
 				switch(work_mode.step)
 				{
-					case 0:   //ï¿½ï¿½Ê¾Í¼Æ¬
+					case 0:   //ÏÔÊ¾Í¼Æ¬
 						picture_display(PIC_AUTO_CLEAN);
 						ir_tx_disable();
 						work_mode.step++;
 					  
 						break;
 					
-					case 1:   //ï¿½ï¿½Ê±ï¿½ä²¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+					case 1:   //´í¿ªÊ±¼ä²¥·ÅÓïÒô
 						voice_play(TURN_OFF);
 						work_mode.step++;
 					
@@ -762,50 +778,50 @@ void work_mode_proc(void)
 				
 				if (!uart[1].flags.b.comm_start && 0 == work_mode.query_timeout_cnt)
 					uart1_send_cmd(CONNECT_QUERY);
-				if (++work_mode.query_timeout_cnt >= 100)  //1sï¿½ï¿½Ñ¯Ò»ï¿½ï¿½	
+				if (++work_mode.query_timeout_cnt >= 100)  //1s²éÑ¯Ò»´Î	
 					work_mode.query_timeout_cnt = 0;
 		
 			  bottom_unconnect_notify();
-				if (!sys_status.flags.bottom_connected)    //ï¿½ï¿½ï¿½ï¿½Î´ï¿½ï¿½ï¿½Ó£ï¿½ï¿½Ë³ï¿½
+				if (!sys_status.flags.bottom_connected)    //µ××ùÎ´Á¬½Ó£¬ÍË³ö
 					break;
 			
 				switch(work_mode.step)
 				{
-					case 2:              //ï¿½ï¿½ï¿½ï¿½Ï´,ï¿½ï¿½ï¿½Ğµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½,ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ª
+					case 2:              //×ÔÇåÏ´,ËùÓĞµç»ú¹¤×÷,Ö÷µç»ú¸ü¸ßËÙÔË×ª
 						for (i = 0; i < MOTOR_CTRL_NUM; i++)
 						{
-							if (sys_status.val)            //Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Óµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğµï¿½ï¿½
+							if (sys_status.val)            //Ö±Á¢»òÁ¬½Óµ××ù£¬¿ªËùÓĞµç»ú
 								motor_ctrl[i].en = ENABLE;
-							else                           //ï¿½ï¿½ï¿½ï¿½ï¿½Ğµï¿½ï¿½
+							else                           //¹ØËùÓĞµç»ú
 								motor_ctrl[i].en = DISABLE;
 						}
-						if (work_mode.time_cnt >= 1200)   //2ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ï¿½ï¿½ï¿½
+						if (work_mode.time_cnt >= 1200)   //2·ÖÖÓÇåÏ´½áÊø
 						{
 								work_mode.time_cnt = 0;
 								work_mode.step = 1;
-								motor_ctrl[MAIN_MOTOR].en = ENABLE;   //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-							  motor_ctrl[PUMP_MOTOR].en = DISABLE;  //ï¿½ï¿½Ë®ï¿½ï¿½
+								motor_ctrl[MAIN_MOTOR].en = ENABLE;   //¹ØÖ÷µç»ú
+							  motor_ctrl[PUMP_MOTOR].en = DISABLE;  //¹ØË®±Ã
 							
-								uart1_send_cmd(DRY_START);            //1ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¿ï¿½Ê¼ï¿½ï¿½É¿ï¿½Ê¼Ö¸ï¿½ï¿½
+								uart1_send_cmd(DRY_START);            //1¡¢¸øµ××ù·¢ËÍ¿ªÊ¼ºæ¸É¿ªÊ¼Ö¸Áî
 						}
 						
 						break;
 					
-					case 3:              //ï¿½ï¿½ï¿½
-						if (sys_status.val)                    //Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½Ë¢Ò»Ö±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+					case 3:              //ºæ¸É
+						if (sys_status.val)                    //Ö±Á¢µ××ùÁ¬½ÓÊ±£¬¹öË¢Ò»Ö±±£³ÖÔËĞĞ
 							motor_ctrl[BRUSH_MOTOR].en = ENABLE;
 						else                          
 							motor_ctrl[BRUSH_MOTOR].en = DISABLE;
 						
-						if (work_mode.time_cnt >= 180000)     //ï¿½ï¿½ï¿½30ï¿½ï¿½ï¿½ï¿½
+						if (work_mode.time_cnt >= 180000)     //ºæ¸É30·ÖÖÓ
 						{
 								motor_ctrl[BRUSH_MOTOR].en = DISABLE;
 								work_mode.step = 0;
 							
-								//ï¿½ï¿½ï¿½Íºï¿½É½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½
+								//·¢ËÍºæ¸É½áÊøÖ¸Áî
 								uart1_send_cmd(DRY_STOP);
 							
-							  //×¼ï¿½ï¿½ï¿½Ø»ï¿½
+							  //×¼±¸¹Ø»ú
 							  work_mode.mode = 0xff;  //??????
 						}
 						break;
@@ -824,7 +840,7 @@ void work_mode_proc(void)
 		wsx_full_notify();
 }
 
-//ï¿½ï¿½ï¿½Û³Ì¶ï¿½ï¿½ï¿½Ê¾
+//ÔàÎÛ³Ì¶ÈÏÔÊ¾
 void dirty_display(void)
 {
 	if (!ir.tx_en)
@@ -878,7 +894,7 @@ void Task1_Process(void)
 {
 	  //voltage_sample();
 	
-	  //ï¿½ï¿½ï¿½×ªï¿½Ù¼ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½Í³ï¿½ï¿½
+	  //µç»ú×ªËÙ¼ÆËãµÄÊ±¼äÍ³¼Æ
 		__disable_irq();
 	  if (wsx_full_check.motor_speed_int_cnt > 0)
 			wsx_full_check.motor_speed_timer_cnt++;
@@ -887,14 +903,14 @@ void Task1_Process(void)
 
 /*****************************************************************************
  * Function:    void Task2_Process(void)
- * Description: ï¿½ï¿½ï¿½ï¿½Í¨ï¿½Å´ï¿½ï¿½ï¿½
+ * Description: ´®¿ÚÍ¨ĞÅ´¦Àí
  *
  * Caveats:
  *
  *****************************************************************************/
 void Task2_Process(void)
 {   
-	if (++uart[2].tx_interval >= 5)  //500ms ï¿½ï¿½Ñ¯Ò»ï¿½Îµï¿½ï¿½ï¿½ï¿½Ï¢
+	if (++uart[2].tx_interval >= 5)  //500ms ²éÑ¯Ò»´Îµç³ØĞÅÏ¢
 	{
 		uart[2].tx_interval = 0;
 		uart2_send_cmd(READ_INFO);
@@ -927,6 +943,358 @@ void assert_errhandler(uint8_t* file, uint32_t line)
 //#define T4 *((volatile unsigned long *)((((uint32_t) IOC_DAT) & 0xF0000000)+0x2000000+((((uint32_t)IOC_DAT) &0xFFFFF)<<5)+(11<<2)))  //IOC11 T4
 //uint8_t f_test = 0;
 
+
+void testGPIOinit(void)
+{
+   GPIO_InitType GPIO_InitStruct;
+
+   GPIOBToF_SetBits(GPIOC, GPIO_Pin_9);
+   GPIO_InitStruct.GPIO_Pin  = GPIO_Pin_9;
+   GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUTPUT_CMOS;
+   GPIOBToF_Init(GPIOC, &GPIO_InitStruct);
+	
+	GPIOBToF_SetBits(GPIOC, GPIO_Pin_9);
+}
+
+void testGPIOHigh(void)
+{
+		GPIOBToF_SetBits(GPIOC, GPIO_Pin_9);
+}
+
+void testGPIOLow(void)
+{
+		GPIOBToF_ResetBits(GPIOC, GPIO_Pin_9);
+}
+
+
+void testPwm(void)
+{
+
+#if 0 //²âÊÔ¸ßËÙµç»úµÄpwm²¨ ²âR19µç×è
+  PWM_BaseInitType PWM_BaseInitStruct;
+  PWM_OCInitType PWM_OCInitStruct;
+  
+  /* PWM0 base initialization 
+       - Count mode   : CONTINUOUS mode
+       - Clock source : PCLK 13M   ÀíÂÛÖµÖ÷Æµ32.768MHz£¬                                    Êµ¼ÊÖ»ÄÜÅÜ26MHzÒÔÏÂ
+       - Clock Divide : divide by 16     */
+  PWM_BaseInitStruct.ClockDivision = PWM_CLKDIV_2;
+  PWM_BaseInitStruct.ClockSource = PWM_CLKSRC_APB;//PWM_CTL_TESL_APBDIV128;//PWM_CLKSRC_APB;//  ÆµÂÊÊÇ16khz
+  PWM_BaseInitStruct.Mode = PWM_MODE_UPCOUNT; //²Î¿¼ÊÖ²á208¹ØÓÚ¼ÆÊı·½Ê½µÄÃèÊö
+  PWM_BaseInit(PWM3, &PWM_BaseInitStruct);
+
+  /** PWM0 channel 1 Initialize:
+       - Mode         : compare mode
+       - Out Mode     : TOGGLE_RESET
+       - Out line     : PWM1 output (IOB6)
+       Output: 12.5Hz 
+       High/Low = (0x8000-0x2000)/(0xFFFF-0x6000) = 3/5
+    */
+  PWM_OLineConfig(PWM3_OUT1, PWM_OLINE_1);	
+  PWM_OCInitStruct.OutMode = PWM_OUTMOD_RESET_SET;//²Î¿¼ÊÖ²ápage 208 picture20-5
+  //PWM_OCInitStruct.Period = 256;     //config CCR0
+  PWM_OC1Init(PWM3, &PWM_OCInitStruct);
+
+	PWM3->CCR0 = 1024;                 //ÓÉClockSourceºÍClockDivisionÒ»Æğ¾ö¶¨   ÆµÂÊ8K
+	PWM3->CCR1 = 256;                  //duty=256/1024
+  
+  PWM_ClearCounter(PWM3);
+  /* Enable PWM0 channel 0/1/2 output */
+  //PWM_OutputCmd(PWM3, PWM_CHANNEL_0, ENABLE);  //pwm3ÎŞ²¨ĞÎÊä³ö
+  PWM_OutputCmd(PWM3, PWM_CHANNEL_1, ENABLE);
+//  PWM_OutputCmd(PWM3, PWM_CHANNEL_2, ENABLE);
+
+#endif
+
+#if 0 //µØË¢µç»ú ²âR67
+
+	
+  PWM_BaseInitType PWM_BaseInitStruct;
+  PWM_OCInitType PWM_OCInitStruct;
+
+  /* PWM0 base initialization 
+       - Count mode   : CONTINUOUS mode
+       - Clock source : PCLK 13M
+       - Clock Divide : divide by 16     */
+  PWM_BaseInitStruct.ClockDivision = PWM_CLKDIV_2;   //125Hz. PWM_CLKDIV_4 20220104 modify
+  PWM_BaseInitStruct.ClockSource = PWM_CLKSRC_APB;//250HZ  ºÍpwm3Ê¹ÓÃµÄÊÇÒ»¸öÊ±ÖÓÔ´£¬µ«ÊÇ·ÖÆµ³öÀ´µÄÊ±ÖÓÈ´²»Ò»Ñù£¬Ô­ÒòÎ´Öª
+  PWM_BaseInitStruct.Mode = PWM_MODE_CONTINUOUS;
+  PWM_BaseInit(PWM0, &PWM_BaseInitStruct);
+
+//  /** PWM0 channel 0 Initialize:
+//       - Mode         : compare mode
+//       - Out Mode     : TOGGLE
+//       - Out line     : PWM0 output (IOB0)
+//       Output: 6.25Hz 
+//       High/Low = 1/1
+////    */   
+//  PWM_OLineConfig(PWM0_OUT0, PWM_OLINE_0);
+//  PWM_OCInitStruct.OutMode = PWM_OUTMOD_TOGGLE_SET;
+//  PWM_OCInitStruct.Period = 0xC000;
+//  PWM_OC0Init(PWM0, &PWM_OCInitStruct);
+//	
+//	////High/Low = = (0x8000-0x4000)/(0xFFFF-0x4000) = 1/3
+//	PWM_OLineConfig(PWM0_OUT1, PWM_OLINE_1);
+//  PWM_OCInitStruct.OutMode = PWM_OUTMOD_TOGGLE_RESET;  //PWM_OUTMOD_TOGGLE_RESET
+//  PWM_OCInitStruct.Period = 0x1000;   //0x6400;
+//  PWM_OC1Init(PWM0, &PWM_OCInitStruct);   //£¡£¡£¡£¡£¡PWM_OC1Init(PWM0, &PWM_OCInitStruct);->ÌØ±ğ×¢Òâ²»ÒªĞ´´íÁË£¬²»ÒªĞ´³É:PWM_OC0Init
+//	
+	
+	PWM0->CCR0 = 0;   //Ä¬ÈÏÖµÊÇ0
+	
+	PWM_OLineConfig(PWM0_OUT2, PWM_OLINE_2);
+  PWM_OCInitStruct.OutMode = PWM_OUTMOD_TOGGLE_SET;  //PWM_OUTMOD_TOGGLE_RESET
+  PWM_OCInitStruct.Period = 0xffff/2-1;   //0x4000;
+  PWM_OC2Init(PWM0, &PWM_OCInitStruct);   //£¡£¡£¡£¡£¡PWM_OC1Init(PWM0, &PWM_OCInitStruct);->ÌØ±ğ×¢Òâ²»ÒªĞ´´íÁË£¬²»ÒªĞ´³É:PWM_OC0Init
+	
+  
+  PWM_ClearCounter(PWM0);
+  /* Enable PWM0 channel 0/1/2 output */
+  //PWM_OutputCmd(PWM0, PWM_CHANNEL_0, DISABLE);
+	//PWM_OutputCmd(PWM0, PWM_CHANNEL_1, DISABLE);
+  PWM_OutputCmd(PWM0, PWM_CHANNEL_2, ENABLE);	
+
+#endif
+
+#if 1 //Ë®±Ãµç»ú R68
+
+  PWM_BaseInitType PWM_BaseInitStruct;
+  PWM_OCInitType PWM_OCInitStruct;
+  
+  /* PWM0 base initialization 
+       - Count mode   : CONTINUOUS mode
+       - Clock source : PCLK 13M
+       - Clock Divide : divide by 16     */
+  PWM_BaseInitStruct.ClockDivision = PWM_CLKDIV_16;
+  PWM_BaseInitStruct.ClockSource = PWM_CLKSRC_APB;//250HZ  ºÍpwm3Ê¹ÓÃµÄÊÇÒ»¸öÊ±ÖÓÔ´£¬µ«ÊÇ·ÖÆµ³öÀ´µÄÊ±ÖÓÈ´²»Ò»Ñù£¬Ô­ÒòÎ´Öª
+  PWM_BaseInitStruct.Mode = PWM_MODE_UPCOUNT; //PWM_MODE_UPCOUNT; //PWM_MODE_CONTINUOUS
+  PWM_BaseInit(PWM1, &PWM_BaseInitStruct);
+
+
+  /** PWM0 channel 1 Initialize:
+       - Mode         : compare mode
+       - Out Mode     : TOGGLE_RESET
+       - Out line     : PWM1 output (IOB6)
+       Output: 12.5Hz 
+       High/Low = (0x8000-0x2000)/(0xFFFF-0x6000) = 3/5
+    */
+  PWM_OLineConfig(PWM1_OUT1, PWM_OLINE_1);
+  PWM_OCInitStruct.OutMode = PWM_OUTMOD_RESET_SET; //PWM_OUTMOD_TOGGLE_RESET
+  //PWM_OCInitStruct.Period = 256;
+  PWM_OC1Init(PWM1, &PWM_OCInitStruct);
+
+	PWM1->CCR0 = 0xFFFF;
+	PWM1->CCR1 = 0xFFFF*1/4;   //20%Õ¼¿Õ±È
+  
+  PWM_ClearCounter(PWM1);
+  /* Enable PWM0 channel 0/1/2 output */
+  //PWM_OutputCmd(PWM1, PWM_CHANNEL_0, ENABLE);  //pwm1ÎŞ²¨ĞÎÊä³ö
+  PWM_OutputCmd(PWM1, PWM_CHANNEL_1, ENABLE);
+//  PWM_OutputCmd(PWM1, PWM_CHANNEL_2, ENABLE);	
+
+#endif
+	
+}
+
+
+void testDeviceModule(void)
+{
+	
+#if 0
+	
+	timer1Init();
+
+#endif	
+	
+#if 0
+
+	testGPIOinit();
+	timer1Init();	
+	
+#endif	
+	
+#if 0
+
+		testfloorBrushMotor();
+
+#endif
+
+#if 0
+
+		testfloorBrushPump();
+
+#endif
+	
+#if 0
+
+	testHighSpeedMotor();	
+	
+#endif	
+	
+#if 0	 //test picture switch
+	while(1){
+			delay_ms(1000);
+			testUartSend();
+			//printf("test log \n");
+	}
+#endif
+
+#if 0	 //test charge pedestal uart
+	while(1){
+			delay_ms(1000);
+			testChargePedestalUartSend();
+			//printf("test log \n");
+	}
+#endif	
+	
+#if 0	 //test battery uart
+	while(1){
+			delay_ms(1000);
+			testbatteryUartSend();
+			//printf("test log \n");
+	}
+#endif		
+
+#if 0
+
+	GPIOBToF_SetBits(GPIOC, GPIO_Pin_7); //control 5v_EN
+	GPIOBToF_SetBits(GPIOB, GPIO_Pin_15);//Control of infrared light(high)
+	
+	qAdcResultValue.channel = ADC_CHANNEL7;
+	adc_init(qAdcResultValue.channel);
+	//ADC_StartManual();
+	while(1){	
+			adcTestFunction();
+			delay_ms(1000);
+			currentTime = getSysTime();
+			printf("test log %d\n",currentTime);				
+	}
+
+#endif
+}
+
+
+/* ´´½¨ÈÎÎñ¾ä±ú */
+static TaskHandle_t AppTaskCreate_Handle;
+/* LED ÈÎÎñ¾ä±ú */
+static TaskHandle_t LED_Task_Handle;
+
+static StackType_t AppTaskCreate_Stack[128];
+/* LED ÈÎÎñ¶ÑÕ» */
+static StackType_t LED_Task_Stack[128];
+
+/* AppTaskCreate ÈÎÎñ¿ØÖÆ¿é */     //Í¨³£ÎÒÃÇ³ÆÕâ¸öÈÎÎñ¿ØÖÆ¿éÎªÈÎÎñµÄÉí·İÖ¤
+static StaticTask_t AppTaskCreate_TCB;
+/* AppTaskCreate ÈÎÎñ¿ØÖÆ¿é */
+static StaticTask_t LED_Task_TCB;
+
+/* ¿ÕÏĞÈÎÎñÈÎÎñ¶ÑÕ» */
+static StackType_t Idle_Task_Stack[configMINIMAL_STACK_SIZE];
+/* ¶¨Ê±Æ÷ÈÎÎñ¶ÑÕ» */
+static StackType_t Timer_Task_Stack[configTIMER_TASK_STACK_DEPTH];
+/* ¿ÕÏĞÈÎÎñ¿ØÖÆ¿é */
+static StaticTask_t Idle_Task_TCB;
+/* ¶¨Ê±Æ÷ÈÎÎñ¿ØÖÆ¿é */
+static StaticTask_t Timer_Task_TCB;
+
+static void AppTaskCreate(void);/* ÓÃÓÚ´´½¨ÈÎÎñ */
+static void LED_Task(void* pvParameters);/* LED_Task ÈÎÎñÊµÏÖ */
+
+
+/**
+**********************************************************************
+* @brief »ñÈ¡¿ÕÏĞÈÎÎñµÄÈÎÎñ¶ÑÕ»ºÍÈÎÎñ¿ØÖÆ¿éÄÚ´æ
+* ppxTimerTaskTCBBuffer : ÈÎÎñ¿ØÖÆ¿éÄÚ´æ
+* ppxTimerTaskStackBuffer : ÈÎÎñ¶ÑÕ»ÄÚ´æ
+* pulTimerTaskStackSize : ÈÎÎñ¶ÑÕ»´óĞ¡
+* @author fire
+* @version V1.0
+* @date 2018-xx-xx
+**********************************************************************
+*/
+void vApplicationGetIdleTaskMemory(StaticTask_t **ppxIdleTaskTCBBuffer,
+																		StackType_t **ppxIdleTaskStackBuffer,
+																		uint32_t    *pulIdleTaskStackSize)
+{
+			*ppxIdleTaskTCBBuffer=&Idle_Task_TCB;/* ÈÎÎñ¿ØÖÆ¿éÄÚ´æ */
+			*ppxIdleTaskStackBuffer=Idle_Task_Stack;/* ÈÎÎñ¶ÑÕ»ÄÚ´æ */
+			*pulIdleTaskStackSize=configMINIMAL_STACK_SIZE;/* ÈÎÎñ¶ÑÕ»´óĞ¡ */
+}
+
+
+/**
+*********************************************************************
+* @brief »ñÈ¡¶¨Ê±Æ÷ÈÎÎñµÄÈÎÎñ¶ÑÕ»ºÍÈÎÎñ¿ØÖÆ¿éÄÚ´æ
+* ppxTimerTaskTCBBuffer : ÈÎÎñ¿ØÖÆ¿éÄÚ´æ
+* ppxTimerTaskStackBuffer : ÈÎÎñ¶ÑÕ»ÄÚ´æ
+* pulTimerTaskStackSize : ÈÎÎñ¶ÑÕ»´óĞ¡
+* @author fire
+* @version V1.0
+* @date 2018-xx-xx
+**********************************************************************
+*/
+void vApplicationGetTimerTaskMemory(StaticTask_t **ppxTimerTaskTCBBuffer,
+																		StackType_t **ppxTimerTaskStackBuffer,
+																		uint32_t *pulTimerTaskStackSize)
+{
+		*ppxTimerTaskTCBBuffer=&Timer_Task_TCB;/* ÈÎÎñ¿ØÖÆ¿éÄÚ´æ */
+		*ppxTimerTaskStackBuffer=Timer_Task_Stack;/* ÈÎÎñ¶ÑÕ»ÄÚ´æ */
+		*pulTimerTaskStackSize=configTIMER_TASK_STACK_DEPTH;/* ÈÎÎñ¶ÑÕ»´óĞ¡ */
+}
+
+static void LED_Task(void* parameter)
+{
+	while (1) {
+		testGPIOLow();
+		vTaskDelay(500); /* ÑÓÊ± 500 ¸ö tick */
+		printf("led1_task running,LED1_OFF\r\n");
+		testGPIOHigh();
+		vTaskDelay(500); /* ÑÓÊ± 500 ¸ö tick */
+		printf("led1_task running,LED1_ON\r\n");
+			
+		
+		
+		//printf("led1_task running,LED1_OFF\r\n");
+ }
+}
+
+static void AppTaskCreate(void)
+{
+		taskENTER_CRITICAL(); //½øÈëÁÙ½çÇø
+		/* ´´½¨ LED_Task ÈÎÎñ */
+		LED_Task_Handle = xTaskCreateStatic((TaskFunction_t )LED_Task, //ÈÎÎñº¯Êı
+																				(const char*)"LED_Task",//ÈÎÎñÃû³Æ
+																				(uint32_t)128, //ÈÎÎñ¶ÑÕ»´óĞ¡
+																				(void* )NULL, //´«µİ¸øÈÎÎñº¯ÊıµÄ²ÎÊı
+																				(UBaseType_t)4, //ÈÎÎñÓÅÏÈ¼¶
+																				(StackType_t*)LED_Task_Stack,//ÈÎÎñ¶ÑÕ»
+																				(StaticTask_t*)&LED_Task_TCB);//ÈÎÎñ¿ØÖÆ¿é
+		if (NULL != LED_Task_Handle) /* ´´½¨³É¹¦ */
+		{
+		    printf("LED_Task ÈÎÎñ´´½¨³É¹¦!\n");
+		}
+		else{
+	    	printf("LED_Task ÈÎÎñ´´½¨Ê§°Ü!\n");
+		}
+		vTaskDelete(AppTaskCreate_Handle); //É¾³ı AppTaskCreate ÈÎÎñ
+		taskEXIT_CRITICAL(); //ÍË³öÁÙ½çÇø
+}
+
+void testFreeRTOS(void)
+{
+		/* ´´½¨ AppTaskCreate ÈÎÎñ */
+		AppTaskCreate_Handle = xTaskCreateStatic( (TaskFunction_t )AppTaskCreate,
+																							(const char* )"AppTaskCreate",//ÈÎÎñÃû³Æ
+																							(uint32_t )128, //ÈÎÎñ¶ÑÕ»´óĞ¡
+																							(void* )NULL,//´«µİ¸øÈÎÎñº¯ÊıµÄ²ÎÊı
+																							(UBaseType_t )3, //ÈÎÎñÓÅÏÈ¼¶
+																							(StackType_t* )AppTaskCreate_Stack,
+																							(StaticTask_t* )&AppTaskCreate_TCB);
+		if (NULL != AppTaskCreate_Handle) /* ´´½¨³É¹¦ */
+		vTaskStartScheduler(); /* Æô¶¯ÈÎÎñ£¬¿ªÆôµ÷¶È */
+}
+
+
 /**
   * @brief  Main program.
   * @param  None
@@ -934,73 +1302,64 @@ void assert_errhandler(uint8_t* file, uint32_t line)
   */
 int main(void)
 {
+	uint32_t currentTime = 0;
+	
 	WDT_Disable();
   Clock_Init();
 	
 	GPIO_init();
 	
-  PMU_WakeUpPinConfig(GPIO_Pin_3, IOA_FALLING);
-	PMU_ClearIOAINTStatus(GPIO_Pin_3);
+	//°´¼üÖĞ¶ÏÅäÖÃ
+  PMU_WakeUpPinConfig(GPIO_Pin_5, IOA_FALLING);
+	PMU_ClearIOAINTStatus(GPIO_Pin_5);//°´¼ü2
 	PMU_WakeUpPinConfig(GPIO_Pin_6, IOA_FALLING);
-	PMU_ClearIOAINTStatus(GPIO_Pin_6);	
-  PMU_INTConfig(PMU_INT_IOAEN, ENABLE);
+	PMU_ClearIOAINTStatus(GPIO_Pin_6);//°´¼ü3
+	
+	PMU_WakeUpPinConfig(GPIO_Pin_7, IOA_FALLING);
+	PMU_ClearIOAINTStatus(GPIO_Pin_7);//Ö±Á¢Ê¶±ğ	
+
+	PMU_WakeUpPinConfig(GPIO_Pin_3, IOA_FALLING);
+	PMU_ClearIOAINTStatus(GPIO_Pin_3);//µç»ú×ªËÙ²âÁ¿	
+	
+  PMU_INTConfig(PMU_INT_IOAEN, ENABLE);//end
+	
+	/* Enable SysTick timer and its interrupt to generate interrupt(1ms) */
+	while(CORTEX_SystemTick_Config(16384000/500)){};//HCLK 1ms(config systick period=1ms)
+		
   CORTEX_SetPriority_ClearPending_EnableIRQ(PMU_IRQn, 0);	
 		
-	delay_init();
-	
-	delay_ms(10);
+	delay_init();	
+					
+	//delay_ms(10);
 	GPIOBToF_SetBits(GPIOD, GPIO_Pin_15);	
-	
+				
 	adc_init(adc_channel);  
 
-	motors_pwm_init();
-	motor_ctrl_init();
-	
-	uarts_init();      
+	//motors_pwm_init();
+	//motor_ctrl_init();
+		
+	highSpeedMotorInit();		
+	floorBrushPumpInit();
+	floorBrushMotorInit();
+		
+	//testGPIOinit();	
+	timer0Init();//measure motor rotary speed
+	timer1Init();//judge key is long press
+		
+		
+	uarts_init(); 
 	user_data_init();
 	Task_InitTime();
-	  
-	/* Enable SysTick timer and its interrupt to generate interrupt(1ms) */
-	CORTEX_SystemTick_Config(16384000/500);   //HCLK 1ms 
 
-//PMU_init();   //ï¿½Í¹ï¿½ï¿½Ä²ï¿½ï¿½ï¿½
-
-  WDT_Enable();  
+	//WDT_Enable();  
 	
 	Stdio_Init();//log init
-	printf(" c9 project start \n");
-//	while(1){
-//			//Delay_ms(1000);
-//			delay_ms(1000);
-//			printf("test log \n");
-//	}
+	//printf(" c9 project start \n");
+
 	
-//	__disable_irq();
-//	__enable_irq();	
-
-  while (1)
-  {
-			//WDT_Clear();                         // Feed  WDT
-		
-			if (TaskTimer[0] == 0) {             // Task2:   10MS --Read Key,Check Uart Break and Feed WDT
-					Task0_Process();
-					TaskTimer[0] = TASK0_CYCLE_VALUE;									
-			}
-
-			if (TaskTimer[1] == 0) {             // Task1:    1MS --AD Samping				  
-					Task1_Process();				  
-					TaskTimer[1] = TASK1_CYCLE_VALUE;
-			}	
-
-			if (TaskTimer[2] == 0) {             // Task2:    100MS ï¿½ï¿½ï¿½ï¿½Í¨ï¿½Å´ï¿½ï¿½ï¿½
-					Task2_Process();				  
-					TaskTimer[2] = TASK2_CYCLE_VALUE;
-			}
-			
-			voltage_sample();     //ï¿½ï¿½ï¿½ï¿½Ê±Ğ§ï¿½ï¿½Òªï¿½ï¿½Ï¸ß£ï¿½ï¿½ï¿½ï¿½Ğ³ï¿½ï¿½ï¿½ 
-//			f_test = 1 - f_test;//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ½ï¿½ï¿½2.8-6.4usÑ­ï¿½ï¿½Ò»ï¿½ï¿½,ï¿½ï¿½ï¿½Ô¼48us
-//  		T4 = f_test;
-  }
+	WDT_Disable();
+	testGPIOinit();
+	testFreeRTOS();
 }
 
 /*********************************** END OF FILE ******************************/

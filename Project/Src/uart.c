@@ -4,6 +4,13 @@
 #include "user.h"
 #include "string.h"
 
+#include "main.h"
+#include "v_stdio.h"
+#include <stdbool.h>
+#include "dwinScreenDriver.h"
+#include "chargePedestal.h"
+#include "battery.h"
+
 const uint8_t CONNECT_QUERY_BUF[UART1_TX_LEN] = {0x55, 0x55,0x01, 0xAB};
 const uint8_t DRY_START_BUF[UART1_TX_LEN] = {0x55, 0x55,0x02, 0xAC};
 const uint8_t DRY_STOP_BUF[UART1_TX_LEN] = {0x55, 0x55,0x03, 0xAD};
@@ -19,7 +26,29 @@ UART_T uart[UART_NUM];
   */
 void UART0_IRQHandler(void)
 {
-  if(UART_GetINTStatus(UART0, UART_INTSTS_TXDONE) != 0)  //∑¢ÀÕ÷–∂œ
+	
+#if 1
+	uint8_t receiveDataTemp = 0;
+  if(UART_GetINTStatus(UART0, UART_INTSTS_TXDONE) != 0)  //ÂèëÈÄÅ‰∏≠Êñ≠
+	{
+		UART_ClearINTStatus(UART0, UART_INTSTS_TXDONE); 
+		V8530SendDataToDWINScreen();	
+  }
+
+	if(UART_GetINTStatus(UART0, UART_INTSTS_RX) != 0)  //Êé•Êî∂‰∏≠Êñ≠
+	{
+		UART_ClearINTStatus(UART0, UART_INTSTS_RX);
+			
+		receiveDataTemp = UART_ReceiveData(UART0);
+		V8530ReceiveDWINScreenData(receiveDataTemp);
+		
+  }		
+	
+#endif	
+	
+#if 0
+	
+  if(UART_GetINTStatus(UART0, UART_INTSTS_TXDONE) != 0)  //ÂèëÈÄÅ‰∏≠Êñ≠
 	{
 		UART_ClearINTStatus(UART0, UART_INTSTS_TXDONE);
     if (uart[0].tx_cnt < uart[0].tx_len - 1)
@@ -33,11 +62,21 @@ void UART0_IRQHandler(void)
     }
   }
 
-	if(UART_GetINTStatus(UART0, UART_INTSTS_RX) != 0)  //Ω” ’÷–∂œ
+	if(UART_GetINTStatus(UART0, UART_INTSTS_RX) != 0)  //Êé•Êî∂‰∏≠Êñ≠
 	{
 		UART_ClearINTStatus(UART0, UART_INTSTS_RX);
 		uart[0].rx_buf[uart[0].rx_len++] = UART_ReceiveData(UART0);
+		
+		if(toggle){
+				toggle = 1 - toggle;
+				testGPIOHigh();
+		}else{
+				toggle = 1 - toggle;
+				testGPIOLow();
+		}			
   }	
+	
+#endif
 }
 
 /**
@@ -45,9 +84,33 @@ void UART0_IRQHandler(void)
   * @param  None
   * @retval None
   */
+
+
 void UART1_IRQHandler(void)
 {
-  if(UART_GetINTStatus(UART1, UART_INTSTS_TXDONE) != 0)  //∑¢ÀÕ÷–∂œ
+	//static bool toggle;
+	
+	
+	uint8_t receiveDataTemp = 0;
+  if(UART_GetINTStatus(UART1, UART_INTSTS_TXDONE) != 0)  //ÂèëÈÄÅ‰∏≠Êñ≠
+	{
+		UART_ClearINTStatus(UART1, UART_INTSTS_TXDONE); 
+		V8530SendDataToChargePedestal();
+  }
+
+	if(UART_GetINTStatus(UART1, UART_INTSTS_RX) != 0)  //Êé•Êî∂‰∏≠Êñ≠
+	{
+		UART_ClearINTStatus(UART1, UART_INTSTS_RX);
+			
+		receiveDataTemp = UART_ReceiveData(UART1);
+		
+		//this function wait to done
+		V8530ReceiveDataFromChargePedestal(receiveDataTemp);
+  }	
+	
+
+#if 0	
+  if(UART_GetINTStatus(UART1, UART_INTSTS_TXDONE) != 0)  //ÂèëÈÄÅ‰∏≠Êñ≠
 	{
 		UART_ClearINTStatus(UART1, UART_INTSTS_TXDONE);
     if (uart[1].tx_cnt < uart[1].tx_len - 1)
@@ -59,11 +122,21 @@ void UART1_IRQHandler(void)
     }
   }
 
-	if(UART_GetINTStatus(UART1, UART_INTSTS_RX) != 0)  //Ω” ’÷–∂œ
+	if(UART_GetINTStatus(UART1, UART_INTSTS_RX) != 0)  //Êé•Êî∂‰∏≠Êñ≠
 	{
 		UART_ClearINTStatus(UART1, UART_INTSTS_RX);
 		uart[1].rx_buf[uart[1].rx_len++] = UART_ReceiveData(UART1);
-  } 	
+		
+		if(toggle){
+				toggle = 1 - toggle;
+				testGPIOHigh();
+		}else{
+				toggle = 1 - toggle;
+				testGPIOLow();
+		}			
+  }
+#endif
+
 }
 
 /**
@@ -73,7 +146,26 @@ void UART1_IRQHandler(void)
   */
 void UART2_IRQHandler(void)
 {
-  if(UART_GetINTStatus(UART2, UART_INTSTS_TXDONE) != 0)  //∑¢ÀÕ÷–∂œ
+	uint8_t receiveDataTemp = 0;
+  if(UART_GetINTStatus(UART2, UART_INTSTS_TXDONE) != 0)  //ÂèëÈÄÅ‰∏≠Êñ≠
+	{
+		UART_ClearINTStatus(UART2, UART_INTSTS_TXDONE); 
+		V8530SendDataToBattery();
+  }
+
+	if(UART_GetINTStatus(UART2, UART_INTSTS_RX) != 0)  //Êé•Êî∂‰∏≠Êñ≠
+	{
+		UART_ClearINTStatus(UART2, UART_INTSTS_RX);
+			
+		receiveDataTemp = UART_ReceiveData(UART2);
+		
+		//this function wait to done
+		V8530ReceiveFromBattery(receiveDataTemp);
+  }		
+
+
+#if 0	
+  if(UART_GetINTStatus(UART2, UART_INTSTS_TXDONE) != 0)  //ÂèëÈÄÅ‰∏≠Êñ≠
 	{
 		UART_ClearINTStatus(UART2, UART_INTSTS_TXDONE);
     if (uart[2].tx_cnt < uart[2].tx_len - 1)
@@ -85,11 +177,21 @@ void UART2_IRQHandler(void)
     }
   }
 
-	if(UART_GetINTStatus(UART2, UART_INTSTS_RX) != 0)  //Ω” ’÷–∂œ
+	if(UART_GetINTStatus(UART2, UART_INTSTS_RX) != 0)  //Êé•Êî∂‰∏≠Êñ≠
 	{
 		UART_ClearINTStatus(UART2, UART_INTSTS_RX);
 		uart[2].rx_buf[uart[2].rx_len++] = UART_ReceiveData(UART2);
+		
+		if(toggle){
+				toggle = 1 - toggle;
+				testGPIOHigh();
+		}else{
+				toggle = 1 - toggle;
+				testGPIOLow();
+		}			
   } 
+	
+#endif	
 }
 
 /**
@@ -97,7 +199,7 @@ void UART2_IRQHandler(void)
   * @param  None
   * @retval None
   */
-void UART3_IRQHandler(void)  //µÁª˙øÿ÷∆¥Æø⁄
+void UART3_IRQHandler(void)  //ÁîµÊú∫ÊéßÂà∂‰∏≤Âè£
 {
 //  /* Transmit handler */
 //  if (UART_GetINTStatus(UART3, UART_INTSTS_TXDONE))
@@ -144,7 +246,7 @@ void UART4_IRQHandler(void)
   */
 void UART5_IRQHandler(void)
 {
-  if(UART_GetINTStatus(UART5, UART_INTSTS_TXDONE) != 0)  //∑¢ÀÕ÷–∂œ
+  if(UART_GetINTStatus(UART5, UART_INTSTS_TXDONE) != 0)  //ÂèëÈÄÅ‰∏≠Êñ≠
 	{
 		UART_ClearINTStatus(UART5, UART_INTSTS_TXDONE);
     if (uart[3].tx_cnt < uart[3].tx_len - 1)
@@ -156,7 +258,7 @@ void UART5_IRQHandler(void)
     }
   }
 
-	if(UART_GetINTStatus(UART5, UART_INTSTS_RX) != 0)  //Ω” ’÷–∂œ
+	if(UART_GetINTStatus(UART5, UART_INTSTS_RX) != 0)  //Êé•Êî∂‰∏≠Êñ≠
 	{
 		UART_ClearINTStatus(UART5, UART_INTSTS_RX);
 		uart[3].rx_buf[uart[3].rx_len++] = UART_ReceiveData(UART5);
@@ -232,13 +334,13 @@ uint8_t uart0_rx_check(void)
 uint8_t uart1_rx_check(void)
 {
 		if (0x55 == uart[1].rx_buf[0] && 0x55 == uart[1].rx_buf[1] && (uart[1].rx_buf[2] | 0x80) == uart[1].rx_buf[2]
-		 && calc_sum(uart[1].rx_buf, 3) == uart[1].rx_buf[3])// ˝æ›∞¸ºÏ≤È
+		 && calc_sum(uart[1].rx_buf, 3) == uart[1].rx_buf[3])//Êï∞ÊçÆÂåÖÊ£ÄÊü•
 			return 1;
     
 		return 0;
 }
 
-//µÁ≥ÿÕ®–≈¥Æø⁄
+//ÁîµÊ±†ÈÄö‰ø°‰∏≤Âè£
 uint8_t uart2_rx_check(void)
 {
 	  uint8_t data_len = uart[2].rx_buf[2];
@@ -257,10 +359,10 @@ void uarts_data_init(void)
 {
 	memset(uart, 0, sizeof(uart));
 	
-	uart[0].uart_ch = UART0;    //œ‘ æ∆¡°¢”Ô“ÙÕ®–≈¥Æø⁄
-	uart[1].uart_ch = UART1;    //µ◊◊˘Õ®–≈¥Æø⁄
-	uart[2].uart_ch = UART2;    //µÁ≥ÿÕ®–≈¥Æø⁄
-	uart[3].uart_ch = UART5;    //wifiÕ®–≈¥Æø⁄	
+	uart[0].uart_ch = UART0;    //ÊòæÁ§∫Â±è„ÄÅËØ≠Èü≥ÈÄö‰ø°‰∏≤Âè£
+	uart[1].uart_ch = UART1;    //Â∫ïÂ∫ßÈÄö‰ø°‰∏≤Âè£
+	uart[2].uart_ch = UART2;    //ÁîµÊ±†ÈÄö‰ø°‰∏≤Âè£
+	uart[3].uart_ch = UART5;    //wifiÈÄö‰ø°‰∏≤Âè£	
 	
 	uart[0].rx_check = uart0_rx_check;
 	uart[1].rx_check = uart1_rx_check;
@@ -268,7 +370,7 @@ void uarts_data_init(void)
 	uart[3].rx_check = uart3_rx_check;
 }
 
-//¥Æø⁄Õ®–≈Õ≥“ª¥¶¿Ì
+//‰∏≤Âè£ÈÄö‰ø°Áªü‰∏ÄÂ§ÑÁêÜ
 void uarts_comm_proc(void)
 {
 	uint8_t i = 0;
@@ -276,7 +378,7 @@ void uarts_comm_proc(void)
 	{
 		if (uart[i].flags.b.comm_start)
 		{
-			if (uart[i].rx_len > 0 && ++uart[i].rx_timeout_cnt >= 2)//100ms ‘≠÷µ3
+			if (uart[i].rx_len > 0 && ++uart[i].rx_timeout_cnt >= 2)//100ms ÂéüÂÄº3
 			{
 				uart[i].rx_timeout_cnt = 0;
 				uart[i].flags.b.rx_ok = uart[i].rx_check();
@@ -290,7 +392,7 @@ void uarts_comm_proc(void)
 			if (0 == uart[i].tx_times || (uart[i].tx_times < UART_SEND_RETRY_TIMES && !uart[i].flags.b.rx_ok))
 			{
 				uart[i].rx_len = 0;
-				UART_SendData(uart[i].uart_ch, uart[i].tx_buf[0]); //∆Ù∂Ø∑¢ÀÕ÷–∂œ
+				UART_SendData(uart[i].uart_ch, uart[i].tx_buf[0]); //ÂêØÂä®ÂèëÈÄÅ‰∏≠Êñ≠
 				if (++uart[i].tx_times >= UART_SEND_RETRY_TIMES)
 				{
 						uart[i].flags.b.rx_done = TRUE;

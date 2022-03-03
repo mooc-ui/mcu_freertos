@@ -11,8 +11,29 @@
 
 #include "target.h"
 #include <stdint.h>
+#include <stdbool.h>
 
-#define  ADC_CH_NUM      5
+#define ADC_CH_NUM 5
+
+#define  ADC_SAMPLE_CHANNEL      7
+
+
+typedef struct sampleAdcSelect_t{
+		uint32_t channel;
+		int16_t  getChannelAdcValue;
+		int16_t  reserve;
+}sampleAdcSelect;
+
+//typedef struct sampleAdcValue{
+//		int16_t vbusAdcValue;//ADC_CHANNEL7
+//		int16_t electrolyticWaterAdcValue;//ADC_CHANNEL8
+//		int16_t infraredAdcValue;//ADC_CHANNEL9
+//		int16_t waterPumpdAdcValue;//ADC_CHANNEL11
+//		int16_t chargeAdcValue;//ADC_CHANNEL3
+//		int16_t floorBrushAdcValue;//ADC_CHANNEL4
+//}sampleAdcValue_t;
+extern sampleAdcSelect qAdcResultValue;
+
 
 typedef enum
 {
@@ -34,6 +55,9 @@ extern ADC_T adc[ADC_CH_NUM];
 
 
 void adc_init(uint32_t Channel);
+
+void startADCSample(uint32_t adcChannelSelect);
+void adcTestFunction(void);
 
 #endif /* __ADC_H__ */
 /*******************************************************************************

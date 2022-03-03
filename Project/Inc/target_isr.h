@@ -17,6 +17,8 @@
 #include "target.h"
 #include "lib_uart.h"
 
+#define HIGH_SPEED_MOTOR_MEASURE_TOTAL_COUNT 1000
+
 /* Includes ------------------------------------------------------------------*/
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/
@@ -53,6 +55,9 @@ void DMA_IRQHandler(void);
 void FLASH_IRQHandler(void);
 void ANA_IRQHandler(void);
 void SPI2_IRQHandler(void);
+
+uint32_t getSysTime(void);
+uint32_t getMotorRotateSpeedMeasureRawData(void);
 
 #ifdef __cplusplus
 }
