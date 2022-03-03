@@ -1,0 +1,12 @@
+
+obj/
+*.uvgui.1
+*.uvopt
+*.lst
+*.m51
+CH549.uvgui.1
+.vscode
+
+Project/MDK-ARM/Objects/
+Project/MDK-ARM/JLinkLog.txt
+Project/MDK-ARM/C9_project.uvguix.1
