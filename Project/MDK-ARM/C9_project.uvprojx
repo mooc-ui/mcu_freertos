@@ -337,7 +337,7 @@
               <MiscControls></MiscControls>
               <Define>USE_TARGET_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>..\Inc;..\Src;..\..\Libraries\Lib_Driver\inc;..\..\Libraries\\Lib_Driver\src;..\..\Libraries\CMSIS\device;..\..\Libraries\CMSIS\include;..\Src\FreeRTOS\include;..\Src\FreeRTOS\portable\RVDS\ARM_CM0</IncludePath>
+              <IncludePath>..\Inc;..\Src;..\..\Libraries\Lib_Driver\inc;..\..\Libraries\\Lib_Driver\src;..\..\Libraries\CMSIS\device;..\..\Libraries\CMSIS\include;..\Src\FreeRTOS\include;..\Src\FreeRTOS\portable\RVDS\ARM_CM0;..\Src\SEGGER_RTT_V640\RTT</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -756,6 +756,31 @@
               <FileName>heap_4.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Src\FreeRTOS\portable\MemMang\heap_4.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>seggerRtt</GroupName>
+          <Files>
+            <File>
+              <FileName>SEGGER_RTT.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\SEGGER_RTT_V640\RTT\SEGGER_RTT.c</FilePath>
+            </File>
+            <File>
+              <FileName>SEGGER_RTT.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Src\SEGGER_RTT_V640\RTT\SEGGER_RTT.h</FilePath>
+            </File>
+            <File>
+              <FileName>SEGGER_RTT_Conf.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Src\SEGGER_RTT_V640\RTT\SEGGER_RTT_Conf.h</FilePath>
+            </File>
+            <File>
+              <FileName>SEGGER_RTT_printf.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\SEGGER_RTT_V640\RTT\SEGGER_RTT_printf.c</FilePath>
             </File>
           </Files>
         </Group>

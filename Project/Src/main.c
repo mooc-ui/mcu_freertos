@@ -31,6 +31,8 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "SEGGER_RTT.h"
+
 /* Private functions ---------------------------------------------------------*/
 
 volatile uint8_t run_flag = 0;                  //默认为关机
@@ -1247,10 +1249,12 @@ static void LED_Task(void* parameter)
 	while (1) {
 		testGPIOLow();
 		vTaskDelay(500); /* 延时 500 个 tick */
-		printf("led1_task running,LED1_OFF\r\n");
+		SEGGER_RTT_printf(0, "led1_task running,LED1_OFF\r\n");
+		//printf("led1_task running,LED1_OFF\r\n");
 		testGPIOHigh();
 		vTaskDelay(500); /* 延时 500 个 tick */
-		printf("led1_task running,LED1_ON\r\n");
+		SEGGER_RTT_printf(0, "led1_task running,LED1_ON\r\n");
+		//printf("led1_task running,LED1_ON\r\n");
 			
 		
 		
