@@ -785,6 +785,21 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>Application</GroupName>
+          <Files>
+            <File>
+              <FileName>taskManage.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Src\taskManage.c</FilePath>
+            </File>
+            <File>
+              <FileName>taskManage.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Src\taskManage.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>::CMSIS</GroupName>
         </Group>
       </Groups>

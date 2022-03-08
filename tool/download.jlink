@@ -1,0 +1,4 @@
+loadfile ./Project/MDK-ARM/Objects/c9_project.hex
+r
+g
+exit

@@ -35,7 +35,7 @@
     extern "C" {
 #endif
 /* *INDENT-ON* */
-
+#include "v_stdio.h"
 /*-----------------------------------------------------------
  * Port specific definitions.
  *
