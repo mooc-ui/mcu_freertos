@@ -10,4 +10,12 @@
    git push -u origin main  //commit code to remote repository
    ```
 
+2. ## how to build a compile environment base on keil5 and j-link tool
+
+   //todo
+
    
+
+3. how to open this project
+
+   //todo
